@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { Client, Authenticator } = require('minecraft-launcher-core');
@@ -6,6 +6,37 @@ const { Auth } = require('msmc');
 const extract = require('extract-zip');
 const { execFile } = require('child_process');
 const run = require('util').promisify(execFile);
+const crypto = require('crypto');
+
+// ---------- Связь с сервером разработчика ----------
+// Вставь сюда адрес своего сервера (https://...). Пока здесь заглушка, лаунчер работает без сервера.
+const SERVER_URL = 'https://ВСТАВЬ-АДРЕС-СЕРВЕРА';
+
+const deviceId = () => {
+  const f = path.join(app.getPath('userData'), 'device.json');
+  try { return JSON.parse(fs.readFileSync(f, 'utf8')).id; }
+  catch { const id = crypto.randomUUID(); fs.writeFileSync(f, JSON.stringify({ id })); return id; }
+};
+
+// Отправляет серверу короткое сообщение и возвращает ответ (бан, обновление, сообщение) или null
+async function ping(event, data) {
+  if (!/^https:\/\/|^http:\/\/localhost/.test(SERVER_URL) || SERVER_URL.includes('ВСТАВЬ')) return null;
+  const s = load();
+  try {
+    const r = await fetch(`${SERVER_URL}/api/hello`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        deviceId: deviceId(), nick: s.account?.name || '', accountType: s.account?.type || '',
+        platform: process.platform, version: app.getVersion(), event, data,
+      }),
+      signal: AbortSignal.timeout(6000),
+    });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+ipcMain.handle('server:check', () => ping('open'));
+ipcMain.handle('open:url', (_e, u) => { if (/^https:\/\//.test(String(u))) shell.openExternal(u); });
 
 const cfgFile = () => path.join(app.getPath('userData'), 'settings.json');
 const defaults = () => ({
@@ -118,6 +149,7 @@ ipcMain.handle('login:microsoft', async () => {
   const s = load();
   s.account = { type: 'microsoft', name: mc.profile.name };
   save(s);
+  ping('login', { type: 'microsoft' });
   return s.account;
 });
 
@@ -128,6 +160,7 @@ ipcMain.handle('login:offline', (_e, name) => {
   const s = load();
   s.account = { type: 'offline', name: nick };
   save(s);
+  ping('login', { type: 'offline' });
   return s.account;
 });
 
@@ -147,6 +180,8 @@ ipcMain.handle('play', async () => {
   const s = load();
   const build = s.builds.find((b) => b.id === s.selected);
   if (!build) return { error: 'Выбери сборку' };
+  const sv = await ping('play', { build: build.name, version: build.version, loader: build.loader || 'vanilla' });
+  if (sv?.banned) return { error: `Доступ закрыт: ${sv.reason || 'нарушение правил'}` };
   if (!mclcAuth && s.account?.type === 'offline') mclcAuth = Authenticator.getAuth(s.account.name);
   if (!mclcAuth) return { error: 'Сессия Microsoft истекла. Войди заново.' };
 
@@ -166,6 +201,7 @@ ipcMain.handle('play', async () => {
   });
   launcher.on('close', (code) => {
     send('log', `Игра закрыта (код ${code})`);
+    ping('game_closed', { code });
     send('state', 'idle');
     win.show();
   });
@@ -183,6 +219,7 @@ ipcMain.handle('play', async () => {
     if (!proc) return { error: 'Не удалось запустить. Проверь Java и версию.' };
     return { ok: true };
   } catch (e) {
+    ping('play_error', { message: String(e.message).slice(0, 200) });
     return { error: e.message };
   }
 });
@@ -279,5 +316,8 @@ ipcMain.handle('skin:apply', async (_e, dataUrl) => {
   return 'Скин применён. Запусти игру — мод CustomSkinLoader уже установлен.';
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  setInterval(() => ping('heartbeat'), 60000); // чтобы в админке было видно, кто онлайн
+});
 app.on('window-all-closed', () => app.quit());
