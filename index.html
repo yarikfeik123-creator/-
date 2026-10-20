@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; img-src 'self' data:">
+<title>BlockLaunch</title>
+<style>
+:root{--bg:#0e1014;--side:#0a0c0f;--card:#151820;--line:#232832;--text:#e8eaee;--mute:#7b8190;--acc:#4ade80;--on-acc:#06280f;--r:12px}
+*{box-sizing:border-box}
+body{margin:0;height:100vh;display:flex;background:var(--bg);color:var(--text);font:14px/1.5 "Segoe UI",system-ui,sans-serif;user-select:none}
+#side{width:210px;background:var(--side);border-right:1px solid var(--line);padding:18px 12px;display:flex;flex-direction:column;gap:4px}
+.logo{font-size:17px;font-weight:600;padding:4px 12px 18px;display:flex;align-items:center;gap:10px}
+.logo i{width:18px;height:18px;background:var(--acc);border-radius:4px;display:block}
+.nav{all:unset;cursor:pointer;padding:10px 12px;border-radius:10px;color:var(--mute)}
+.nav:hover{background:#14171d;color:var(--text)}
+.nav.on{background:#1b2a22;color:var(--acc)}
+.acct{margin-top:auto;display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
+.av{width:30px;height:30px;border-radius:50%;background:var(--acc);color:var(--on-acc);display:grid;place-items:center;font-weight:600}
+#main{flex:1;min-width:0;padding:26px 30px;overflow:auto;display:flex;flex-direction:column;gap:18px}
+h1{margin:0;font-size:20px;font-weight:600}
+.mute{color:var(--mute)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.btn{all:unset;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:10px 18px;border-radius:10px;background:#1c202a;border:1px solid #2c313c}
+.btn:hover{background:#232834}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:var(--on-acc);font-weight:600}
+.btn.pri:hover{filter:brightness(1.08)}
+.btn.big{padding:14px 44px;font-size:16px}
+.btn[aria-disabled=true]{opacity:.5;pointer-events:none}
+input[type=text],select{width:100%;background:#0a0c0f;border:1px solid #2c313c;border-radius:10px;padding:10px 12px;color:var(--text);font:inherit;user-select:text}
+input:focus,select:focus,.btn:focus-visible,.nav:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+input[type=range]{width:100%;accent-color:var(--acc)}
+.row{display:flex;gap:10px;align-items:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.build{cursor:pointer}
+.build.sel{border-color:var(--acc)}
+.chip{display:inline-block;padding:2px 10px;border-radius:99px;background:#1c202a;color:#a6acba;font-size:12px}
+pre#log{margin:0;height:170px;overflow:auto;background:#0a0c0f;border:1px solid var(--line);border-radius:10px;padding:10px;font:12px/1.5 Consolas,monospace;color:#a6acba;white-space:pre-wrap;user-select:text}
+.err{color:#f87171}
+label.sw{display:flex;justify-content:space-between;align-items:center;cursor:pointer}
+.login{margin:auto;width:360px;display:flex;flex-direction:column;gap:12px;text-align:center}
+.skw{position:relative;width:min(100%,480px);aspect-ratio:1;background:repeating-conic-gradient(#1b1f27 0 25%,#151820 0 50%) 0 0/16px 16px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.sk{position:absolute;inset:0;width:100%;height:100%;image-rendering:pixelated;touch-action:none;cursor:crosshair}
+.guide{pointer-events:none}
+.sw8{width:26px;height:26px;border-radius:6px;border:2px solid transparent;cursor:pointer;box-shadow:inset 0 0 0 1px #0006}
+.sw8.on{border-color:#fff}
+.tool{padding:8px 12px}
+.tool.on{background:#1b2a22;border-color:var(--acc);color:var(--acc)}
+.item{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--line)}
+.item:last-child{border:0}
+</style>
+</head>
+<body>
+<aside id="side"></aside>
+<main id="main"></main>
+<script>
+const $ = (s) => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (k === 'class') e.className = v;
+    else e[k] = v;
+  }
+  e.append(...kids);
+  return e;
+};
+
+let S, versions = [], view = 'home', playing = false;
+const save = () => api.setSettings(S);
+const curBuild = () => S.builds.find((b) => b.id === S.selected) || S.builds[0];
+const go = (v) => { view = v; draw(); if (v === 'mods') refreshMods().then(() => view === 'mods' && draw()); };
+
+function loginView() {
+  const err = el('div', { class: 'err' });
+  const nick = el('input', { type: 'text', placeholder: 'Ник для офлайн-режима', maxLength: 16 });
+  const done = async (p) => {
+    try { S.account = await p; draw(); } catch (e) { err.textContent = e.message.replace(/^Error invoking.*?Error: /, ''); }
+  };
+  return el('div', { class: 'login' },
+    el('h1', {}, 'Кто будет играть?'),
+    el('div', { class: 'mute' }, 'Войди через Microsoft или играй без лицензии.'),
+    el('button', { class: 'btn pri', onclick: () => done(api.loginMicrosoft()) }, 'Войти через Microsoft'),
+    el('div', { class: 'mute' }, 'или'),
+    nick,
+    el('button', { class: 'btn', onclick: () => done(api.loginOffline(nick.value)) }, 'Играть офлайн'),
+    err);
+}
+
+function homeView() {
+  const b = curBuild();
+  const log = el('pre', { id: 'log' }, 'Здесь появятся сообщения запуска.');
+  const btn = el('button', { class: 'btn pri big' }, playing ? 'Запуск…' : 'Играть');
+  btn.setAttribute('aria-disabled', playing);
+  btn.onclick = async () => {
+    playing = true; draw();
+    const r = await api.play();
+    if (r.error) { playing = false; draw(); $('#log').textContent = r.error; $('#log').classList.add('err'); }
+  };
+  return el('div', { style: 'display:contents' },
+    el('h1', {}, `Привет, ${S.account.name}`),
+    el('div', { class: 'card', style: 'display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap' },
+      el('div', {},
+        el('div', { class: 'mute' }, 'Выбранная сборка'),
+        el('h1', {}, b.name),
+        el('span', { class: 'chip' }, `Minecraft ${b.version}`), ' ',
+        el('span', { class: 'chip' }, `${S.ram} ГБ`)),
+      btn),
+    log);
+}
+
+function buildsView() {
+  const name = el('input', { type: 'text', placeholder: 'Название сборки' });
+  const ver = el('select', {}, ...versions.map((v) => el('option', { value: v }, v)));
+  const ld = el('select', {}, el('option', { value: 'vanilla' }, 'Ванильная'), el('option', { value: 'fabric' }, 'Fabric (моды)'));
+  const add = () => {
+    if (!name.value.trim()) return name.focus();
+    const id = Date.now().toString(36);
+    S.builds.push({ id, name: name.value.trim(), version: ver.value, loader: ld.value });
+    S.selected = id; save(); draw();
+  };
+  return el('div', { style: 'display:contents' },
+    el('h1', {}, 'Сборки'),
+    el('div', { class: 'grid' }, ...S.builds.map((b) =>
+      el('div', { class: 'card build' + (b.id === S.selected ? ' sel' : ''), onclick: () => { S.selected = b.id; save(); draw(); } },
+        el('div', { style: 'font-weight:600' }, b.name),
+        el('div', { class: 'mute' }, `Minecraft ${b.version} · ${b.loader === 'fabric' ? 'Fabric' : 'ванильная'}`),
+        b.id === S.selected ? el('span', { class: 'chip' }, 'Выбрана') : ''))),
+    el('div', { class: 'card' },
+      el('div', { style: 'font-weight:600;margin-bottom:10px' }, 'Новая сборка'),
+      el('div', { class: 'row' }, name, el('div', { style: 'width:130px' }, ver), el('div', { style: 'width:150px' }, ld), el('button', { class: 'btn pri', onclick: add }, 'Создать'))));
+}
+
+function settingsView() {
+  const ramOut = el('b', {}, `${S.ram} ГБ`);
+  const gameDir = el('input', { type: 'text', value: S.gameDir, readOnly: true });
+  const java = el('input', { type: 'text', value: S.javaPath, placeholder: 'Скачается автоматически', onchange: (e) => { S.javaPath = e.target.value.trim(); save(); } });
+  const closeBox = el('input', { type: 'checkbox', checked: S.closeOnLaunch, onchange: (e) => { S.closeOnLaunch = e.target.checked; save(); } });
+  return el('div', { style: 'display:contents' },
+    el('h1', {}, 'Настройки'),
+    el('div', { class: 'card' },
+      el('div', { class: 'row', style: 'justify-content:space-between;margin-bottom:8px' }, 'Выделенная память', ramOut),
+      el('input', { type: 'range', min: 1, max: 16, step: 1, value: S.ram,
+        oninput: (e) => { S.ram = +e.target.value; ramOut.textContent = `${S.ram} ГБ`; },
+        onchange: save })),
+    el('div', { class: 'card' },
+      el('div', { class: 'mute', style: 'margin-bottom:6px' }, 'Путь к Java'), java,
+      el('div', { class: 'mute', style: 'margin:12px 0 6px' }, 'Папка игры'),
+      el('div', { class: 'row' }, gameDir, el('button', { class: 'btn', onclick: async () => {
+        const d = await api.pickDir(); if (d) { S.gameDir = d; gameDir.value = d; save(); }
+      } }, 'Выбрать'))),
+    el('div', { class: 'card' }, el('label', { class: 'sw' }, 'Скрывать лаунчер при запуске игры', closeBox)),
+    el('div', {}, el('button', { class: 'btn', onclick: async () => { await api.logout(); S.account = null; draw(); } }, 'Выйти из аккаунта')));
+}
+
+const errMsg = (e) => String(e.message || e).replace(/^Error invoking remote method '[^']*': (Error: )?/, '');
+
+// ---------- Моды ----------
+let mods = { results: [], installed: [], msg: '', q: '' };
+const refreshMods = async () => { try { mods.installed = await api.modsList(); } catch { mods.installed = []; } };
+const busyMods = async (fn) => {
+  mods.msg = 'Подожди, работаю…'; draw();
+  try { mods.msg = (await fn()) || ''; } catch (e) { mods.msg = errMsg(e); }
+  await refreshMods(); draw();
+};
+
+function modsView() {
+  const b = curBuild();
+  if (b.loader !== 'fabric') return el('div', { style: 'display:contents' },
+    el('h1', {}, 'Моды'),
+    el('div', { class: 'card' },
+      el('p', { style: 'margin:0 0 12px' }, `Сборка «${b.name}» ванильная, моды в ней не работают. Fabric подходит для большинства современных модов.`),
+      el('button', { class: 'btn pri', onclick: () => { b.loader = 'fabric'; save(); draw(); } }, 'Переключить на Fabric')));
+  const search = () => busyMods(async () => {
+    mods.q = q.value.trim();
+    mods.results = await api.modsSearch(mods.q);
+    return mods.results.length ? '' : 'Ничего не найдено';
+  });
+  const q = el('input', { type: 'text', value: mods.q, placeholder: 'Название мода, например Sodium', onkeydown: (e) => e.key === 'Enter' && search() });
+  return el('div', { style: 'display:contents' },
+    el('h1', {}, 'Моды'),
+    el('div', { class: 'mute' }, `Сборка «${b.name}» · Minecraft ${b.version} · Fabric`),
+    el('div', { class: 'row' }, q, el('button', { class: 'btn pri', onclick: search }, 'Найти')),
+    mods.msg ? el('div', { class: 'card' }, mods.msg) : '',
+    mods.results.length ? el('div', { class: 'card' }, ...mods.results.map((m) =>
+      el('div', { class: 'item' },
+        el('div', { style: 'flex:1;min-width:0' }, el('div', { style: 'font-weight:600' }, m.title), el('div', { class: 'mute' }, m.text)),
+        el('button', { class: 'btn', onclick: () => busyMods(async () => `Установлено файлов: ${(await api.modsInstall(m.id)).length}`) }, 'Установить')))) : '',
+    el('div', { class: 'card' },
+      el('div', { style: 'font-weight:600;margin-bottom:6px' }, `Установленные моды (${mods.installed.length})`),
+      ...(mods.installed.length ? mods.installed.map((m) => el('div', { class: 'item' },
+        el('input', { type: 'checkbox', checked: m.on, title: 'Включён', onchange: () => busyMods(() => api.modsToggle(m.file)) }),
+        el('div', { style: 'flex:1;min-width:0;word-break:break-all' + (m.on ? '' : ';opacity:.5') }, m.file.replace(/\.disabled$/, '')),
+        el('button', { class: 'btn', onclick: () => busyMods(() => api.modsRemove(m.file)) }, 'Удалить')))
+        : [el('div', { class: 'mute' }, 'Пока пусто. Найди мод выше и нажми «Установить».')])));
+}
+
+// ---------- Редактор скинов ----------
+const PAL = ['#000000', '#ffffff', '#c58c5f', '#e0b48a', '#4a2f1b', '#d8a03a', '#3b4fd8', '#2a9d8f', '#4ade80', '#e24b4a', '#a78bfa', '#7b8190'];
+const REG = [['голова', 8, 8, 8, 8], ['тело', 20, 20, 8, 12], ['рука', 44, 20, 4, 12], ['рука', 36, 52, 4, 12], ['нога', 4, 20, 4, 12], ['нога', 20, 52, 4, 12]];
+let skinState = null, skinTool = 'pencil', skinColor = '#4ade80', skinGuide = true, skinUndo = [];
+
+function flood(ctx, x, y, hex) {
+  const img = ctx.getImageData(0, 0, 64, 64), d = img.data, i0 = (y * 64 + x) * 4;
+  const t = [d[i0], d[i0 + 1], d[i0 + 2], d[i0 + 3]];
+  const c = [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16), 255];
+  if (t.every((v, i) => v === c[i])) return;
+  const st = [[x, y]];
+  while (st.length) {
+    const [px, py] = st.pop();
+    if (px < 0 || py < 0 || px > 63 || py > 63) continue;
+    const i = (py * 64 + px) * 4;
+    if (d[i] !== t[0] || d[i + 1] !== t[1] || d[i + 2] !== t[2] || d[i + 3] !== t[3]) continue;
+    d.set(c, i);
+    st.push([px + 1, py], [px - 1, py], [px, py + 1], [px, py - 1]);
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function skinsView() {
+  const cv = el('canvas', { width: 64, height: 64, class: 'sk' });
+  const gd = el('canvas', { width: 512, height: 512, class: 'sk guide' });
+  const ctx = cv.getContext('2d', { willReadFrequently: true });
+  const g = gd.getContext('2d');
+  g.strokeStyle = '#4ade80'; g.fillStyle = '#4ade80'; g.font = '12px sans-serif';
+  REG.forEach(([n, x, y, w, h]) => { g.strokeRect(x * 8 + .5, y * 8 + .5, w * 8 - 1, h * 8 - 1); g.fillText(n, x * 8 + 4, y * 8 + 14); });
+  gd.style.display = skinGuide ? '' : 'none';
+
+  const commit = () => { skinState = ctx.getImageData(0, 0, 64, 64); };
+  const pushUndo = () => { skinUndo.push(ctx.getImageData(0, 0, 64, 64)); if (skinUndo.length > 40) skinUndo.shift(); };
+  const loadUrl = (url) => { const im = new Image(); im.onload = () => { pushUndo(); ctx.clearRect(0, 0, 64, 64); ctx.drawImage(im, 0, 0); commit(); }; im.src = url; };
+  const template = () => {
+    pushUndo(); ctx.clearRect(0, 0, 64, 64);
+    const R = (c, x, y, w, h) => { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); };
+    R('#c58c5f', 0, 8, 32, 8); R('#c58c5f', 8, 0, 16, 8); R('#4a2f1b', 8, 0, 16, 2); R('#4a2f1b', 8, 8, 8, 2);
+    R('#ffffff', 9, 12, 2, 1); R('#ffffff', 13, 12, 2, 1); R('#3b4fd8', 10, 12, 1, 1); R('#3b4fd8', 13, 12, 1, 1); R('#7a4a2b', 11, 14, 2, 1);
+    R('#2a9d8f', 16, 20, 24, 12); R('#2a9d8f', 20, 16, 16, 4);
+    R('#c58c5f', 40, 20, 16, 12); R('#c58c5f', 44, 16, 8, 4); R('#c58c5f', 32, 52, 16, 12); R('#c58c5f', 36, 48, 8, 4);
+    R('#3b4fd8', 0, 20, 16, 12); R('#3b4fd8', 4, 16, 8, 4); R('#3b4fd8', 16, 52, 16, 12); R('#3b4fd8', 20, 48, 8, 4);
+    commit();
+  };
+  if (skinState) ctx.putImageData(skinState, 0, 0);
+  else api.skinLoad().then((d) => (d ? loadUrl(d) : template()));
+
+  const pos = (e) => { const r = cv.getBoundingClientRect(); return [Math.floor(((e.clientX - r.left) / r.width) * 64), Math.floor(((e.clientY - r.top) / r.height) * 64)]; };
+  const paint = (x, y) => {
+    if (x < 0 || y < 0 || x > 63 || y > 63) return;
+    if (skinTool === 'eraser') ctx.clearRect(x, y, 1, 1);
+    else { ctx.fillStyle = skinColor; ctx.fillRect(x, y, 1, 1); }
+  };
+  let down = false;
+  cv.onpointerdown = (e) => {
+    const [x, y] = pos(e);
+    if (x < 0 || y < 0 || x > 63 || y > 63) return;
+    pushUndo();
+    if (skinTool === 'pick') {
+      const d = ctx.getImageData(x, y, 1, 1).data;
+      if (d[3]) { skinColor = '#' + [d[0], d[1], d[2]].map((v) => v.toString(16).padStart(2, '0')).join(''); skinTool = 'pencil'; draw(); }
+      return;
+    }
+    if (skinTool === 'fill') { flood(ctx, x, y, skinColor); commit(); return; }
+    down = true; cv.setPointerCapture(e.pointerId); paint(x, y);
+  };
+  cv.onpointermove = (e) => { if (down) paint(...pos(e)); };
+  cv.onpointerup = () => { if (down) { down = false; commit(); } };
+
+  const status = el('div', { class: 'mute' });
+  const file = el('input', { type: 'file', accept: 'image/png', style: 'display:none', onchange: (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader(); r.onload = () => loadUrl(r.result); r.readAsDataURL(f);
+  } });
+  const tools = [['pencil', 'Карандаш'], ['eraser', 'Ластик'], ['fill', 'Заливка'], ['pick', 'Пипетка']];
+
+  return el('div', { style: 'display:contents' },
+    el('h1', {}, 'Редактор скинов'),
+    el('div', { class: 'mute' }, S.account.type === 'offline'
+      ? 'Нарисуй скин и нажми «Применить». Работает для офлайн-ника на сборках Fabric.'
+      : 'У лицензионного аккаунта скин меняется на сайте minecraft.net. Редактор можно использовать, чтобы нарисовать и скачать PNG.'),
+    el('div', { class: 'row', style: 'align-items:flex-start;flex-wrap:wrap;gap:20px' },
+      el('div', { class: 'skw' }, cv, gd),
+      el('div', { style: 'display:flex;flex-direction:column;gap:12px;min-width:230px;flex:1' },
+        el('div', { class: 'row', style: 'flex-wrap:wrap' }, ...tools.map(([id, t]) =>
+          el('button', { class: 'btn tool' + (skinTool === id ? ' on' : ''), onclick: () => { skinTool = id; draw(); } }, t))),
+        el('div', { class: 'row', style: 'flex-wrap:wrap;gap:6px' },
+          ...PAL.map((c) => el('div', { class: 'sw8' + (skinColor === c ? ' on' : ''), style: `background:${c}`, title: c, onclick: () => { skinColor = c; draw(); } })),
+          el('input', { type: 'color', value: skinColor, title: 'Свой цвет', onchange: (e) => { skinColor = e.target.value; draw(); } })),
+        el('label', { class: 'sw' }, 'Показать подсказки по частям тела',
+          el('input', { type: 'checkbox', checked: skinGuide, onchange: (e) => { skinGuide = e.target.checked; gd.style.display = skinGuide ? '' : 'none'; } })),
+        el('div', { class: 'row', style: 'flex-wrap:wrap' },
+          el('button', { class: 'btn', onclick: () => { const p = skinUndo.pop(); if (p) { ctx.putImageData(p, 0, 0); commit(); } } }, 'Отменить'),
+          el('button', { class: 'btn', onclick: template }, 'Шаблон'),
+          el('button', { class: 'btn', onclick: () => file.click() }, 'Открыть PNG'),
+          el('button', { class: 'btn', onclick: () => el('a', { href: cv.toDataURL('image/png'), download: 'skin.png' }).click() }, 'Скачать PNG')),
+        el('button', { class: 'btn pri', onclick: async () => {
+          status.textContent = 'Применяю…';
+          try { status.textContent = await api.skinApply(cv.toDataURL('image/png')); } catch (e) { status.textContent = errMsg(e); }
+        } }, 'Применить к моему нику'),
+        status, file)));
+}
+
+function draw() {
+  const items = [['home', 'Играть'], ['builds', 'Сборки'], ['mods', 'Моды'], ['skins', 'Скины'], ['settings', 'Настройки']];
+  $('#side').replaceChildren(
+    el('div', { class: 'logo' }, el('i'), 'BlockLaunch'),
+    ...items.map(([id, t]) => el('button', { class: 'nav' + (view === id ? ' on' : ''), onclick: () => go(id) }, t)),
+    S.account ? el('div', { class: 'acct' }, el('div', { class: 'av' }, S.account.name[0].toUpperCase()),
+      el('div', {}, el('div', {}, S.account.name), el('div', { class: 'mute', style: 'font-size:12px' }, S.account.type === 'microsoft' ? 'Microsoft' : 'Офлайн'))) : '');
+  const views = { home: homeView, builds: buildsView, mods: modsView, skins: skinsView, settings: settingsView };
+  $('#main').replaceChildren(S.account ? views[view]() : loginView());
+}
+
+(async () => {
+  S = await api.getSettings();
+  versions = ['1.21.4', '1.21.1', '1.20.1'];
+  api.onLog((m) => { const l = $('#log'); if (l) { l.classList.remove('err'); l.textContent += '\n' + m; l.scrollTop = l.scrollHeight; } });
+  api.onState(() => { playing = false; draw(); });
+  draw();
+  api.versions().then((v) => { if (v.length) { versions = v; if (view === 'builds') draw(); } }).catch(() => {});
+})();
+</script>
+</body>
+</html>
