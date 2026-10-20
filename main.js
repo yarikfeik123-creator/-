@@ -10,7 +10,7 @@ const crypto = require('crypto');
 
 // ---------- Связь с сервером разработчика ----------
 // Вставь сюда адрес своего сервера (https://...). Пока здесь заглушка, лаунчер работает без сервера.
-const SERVER_URL = 'https://ВСТАВЬ-АДРЕС-СЕРВЕРА';
+const SERVER_URL = 'http://localhost:3000';
 
 const deviceId = () => {
   const f = path.join(app.getPath('userData'), 'device.json');
